@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ShadBuffer
@@ -50,6 +51,7 @@ namespace ShadBuffer
         private DateTime ignoreReplayUntil = DateTime.MinValue;
         private DateTime ignoreMicUntil = DateTime.MinValue;
         private DateTime messageUntil = DateTime.MinValue;
+        private readonly DateTime openedAtUtc = DateTime.UtcNow;
 
         public bool Busy { get; set; }
         public bool DialogOpen { get; set; }
@@ -96,6 +98,8 @@ namespace ShadBuffer
             statusTimer.Start();
             UpdateStatus();
 
+            Ui.FontChanged += OnFontChanged;
+
             Deactivate += (_, __) => CheckFocusSoon();
             KeyDown += (_, e) =>
             {
@@ -130,6 +134,10 @@ namespace ShadBuffer
             }
             BeginInvoke(new Action(() =>
             {
+                if ((DateTime.UtcNow - openedAtUtc).TotalMilliseconds < 500)
+                {
+                    return;
+                }
                 if (!IsDisposed && !Busy && !DialogOpen && ActiveForm == null)
                 {
                     Close();
@@ -162,6 +170,7 @@ namespace ShadBuffer
         {
             base.OnShown(e);
             Activate();
+            BringToFront();
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -185,12 +194,39 @@ namespace ShadBuffer
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            Ui.FontChanged -= OnFontChanged;
             statusTimer.Dispose();
             if (restoreFocus && previousWindow != IntPtr.Zero)
             {
                 SetForegroundWindow(previousWindow);
             }
             base.OnFormClosed(e);
+        }
+
+        private void OnFontChanged()
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            Font = Ui.Text(13);
+            messageLabel.Font = Ui.Text(12.5F);
+            micValue.Font = Ui.Text(14);
+            saveButton.Font = Ui.Strong(15);
+            RefreshOverlayFonts(this);
+            Invalidate(true);
+        }
+
+        private static void RefreshOverlayFonts(Control parent)
+        {
+            foreach (Control c in parent.Controls)
+            {
+                if (c is Label lbl && lbl.Tag is float fontSize)
+                {
+                    lbl.Font = Ui.Text(fontSize, lbl.Font.Style);
+                }
+                RefreshOverlayFonts(c);
+            }
         }
 
         private void BuildHeader()
@@ -200,6 +236,7 @@ namespace ShadBuffer
             {
                 Text = Context.AppName,
                 Font = Ui.Text(20, FontStyle.Bold),
+                Tag = 20F,
                 ForeColor = Theme.Text,
                 BackColor = Theme.Panel,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -240,7 +277,7 @@ namespace ShadBuffer
 
             replayRow.SetBounds(0, y, width, Ui.S(RowHeight));
             replaySwitch.Location = new Point(width - Ui.S(16) - replaySwitch.Width, (replayRow.Height - replaySwitch.Height) / 2);
-            replaySwitch.Toggled += (_, __) => ToggleReplay();
+            replaySwitch.Toggled += (_, __) => _ = ToggleReplay();
             replayRow.Controls.Add(replaySwitch);
             y += Ui.S(RowHeight);
 
@@ -270,8 +307,8 @@ namespace ShadBuffer
             micValue.Font = Ui.Text(14);
             micValue.SetBounds(next.Left - value, top, value, height);
             var previous = new IconButton(Icons.Left) { IconSize = 11, HoverColor = Theme.Panel, Bounds = new Rectangle(micValue.Left - arrow, top, arrow, height) };
-            next.Click += (_, __) => ToggleMic();
-            previous.Click += (_, __) => ToggleMic();
+            next.Click += (_, __) => _ = ToggleMic();
+            previous.Click += (_, __) => _ = ToggleMic();
             micRow.Controls.Add(previous);
             micRow.Controls.Add(micValue);
             micRow.Controls.Add(next);
@@ -336,7 +373,7 @@ namespace ShadBuffer
             owner.SaveClip();
         }
 
-        private async void ToggleReplay()
+        private async Task ToggleReplay()
         {
             bool on = replaySwitch.Checked;
             switching = true;
@@ -358,7 +395,7 @@ namespace ShadBuffer
             UpdateStatus();
         }
 
-        private async void ToggleMic()
+        private async Task ToggleMic()
         {
             bool on = !micOn;
             micOn = on;

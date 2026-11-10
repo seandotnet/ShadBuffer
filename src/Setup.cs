@@ -18,6 +18,7 @@ namespace ShadBuffer
             new[] { "General", "FirstRun" },
             new[] { "General", "ConfirmOnExit" },
             new[] { "BasicWindow", "SysTrayEnabled" },
+            new[] { "BasicWindow", "SysTrayWhenStarted" },
             new[] { "Basic", "Profile" },
             new[] { "Basic", "ProfileDir" },
             new[] { "Basic", "SceneCollection" },
@@ -254,7 +255,8 @@ namespace ShadBuffer
                 DeleteFile(ctx.InstalledExe);
                 return;
             }
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c ping -n 4 127.0.0.1 >nul & del \"{ctx.InstalledExe}\"")
+            string cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+            Process.Start(new ProcessStartInfo(cmd, $"/c ping -n 4 127.0.0.1 >nul & del \"{ctx.InstalledExe}\"")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -328,6 +330,7 @@ namespace ShadBuffer
             ini.Set("General", "FirstRun", "true");
             ini.Set("General", "ConfirmOnExit", "false");
             ini.Set("BasicWindow", "SysTrayEnabled", "true");
+            ini.Set("BasicWindow", "SysTrayWhenStarted", "true");
             ini.Set("Basic", "Profile", Context.AppName);
             ini.Set("Basic", "ProfileDir", Context.AppName);
             ini.Set("Basic", "SceneCollection", Context.AppName);

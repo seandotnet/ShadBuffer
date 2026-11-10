@@ -30,7 +30,20 @@ namespace ShadBuffer
 
             if (args.Contains("--tray"))
             {
-                return Companion.Run(ctx, args.Contains("--login"));
+                return Companion.Run(ctx, args.Contains("--login"), args.Contains("--show-overlay"));
+            }
+
+            if (Setup.IsInstalled(ctx) && action == null)
+            {
+                StartObsIfConfigured(ctx);
+
+                if (Companion.IsRunning())
+                {
+                    Companion.SignalShowOverlay();
+                    return 0;
+                }
+
+                return Companion.Run(ctx, false, showOverlay: true);
             }
 
             if (Setup.IsInstalled(ctx))
@@ -39,6 +52,25 @@ namespace ShadBuffer
             }
             Application.Run(new MainForm(ctx, action));
             return 0;
+        }
+
+        private static void StartObsIfConfigured(Context ctx)
+        {
+            if (!Obs.IsRunning(ctx))
+            {
+                try
+                {
+                    string root = Obs.FindRoot(ctx);
+                    if (root != null)
+                    {
+                        Setup.StartObs(ctx, root);
+                    }
+                }
+                catch (Exception e)
+                {
+                    ctx.Log("Failed to auto-start OBS: " + e.Message);
+                }
+            }
         }
 
         // no window, so an open obs just stops it instead of asking

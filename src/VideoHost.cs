@@ -38,6 +38,7 @@ namespace ShadBuffer
         };
 
         public event Action Clicked;
+        public event Action DoubleClicked;
         public event Action Finished;
         public event Action Opened;
         public event Action Failed;
@@ -45,6 +46,17 @@ namespace ShadBuffer
 
         public bool Playing { get; private set; }
         public bool HasFailed { get; private set; }
+
+        public bool IsMuted
+        {
+            get => media.IsMuted;
+            set => media.IsMuted = value;
+        }
+
+        public void ToggleMute()
+        {
+            IsMuted = !IsMuted;
+        }
 
         public TimeSpan Length => media.NaturalDuration.HasTimeSpan ? media.NaturalDuration.TimeSpan : TimeSpan.Zero;
 
@@ -70,6 +82,13 @@ namespace ShadBuffer
             root.Children.Add(media);
             root.Children.Add(badge);
             root.Children.Add(problem);
+            root.MouseLeftButtonDown += (_, e) =>
+            {
+                if (e.ClickCount == 2)
+                {
+                    DoubleClicked?.Invoke();
+                }
+            };
             root.MouseLeftButtonUp += (_, __) => Clicked?.Invoke();
             root.PreviewKeyDown += (_, e) => KeyPressed?.Invoke(e.Key);
             Child = root;

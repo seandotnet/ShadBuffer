@@ -34,6 +34,8 @@ namespace ShadBuffer
 
         private readonly Panel frame = new Panel { BackColor = Color.Black };
         private readonly IconButton playButton = new IconButton(Icons.Play) { Boxed = true };
+        private readonly IconButton muteButton = new IconButton(Icons.Volume) { Boxed = true };
+        private readonly IconButton fullscreenButton = new IconButton(Icons.FullScreen) { Boxed = true };
         private readonly ProgressLine scrub = new ProgressLine { Interactive = true };
         private readonly Label clock = NewLabel(13, Theme.Muted);
         private readonly ThumbStrip strip;
@@ -76,6 +78,10 @@ namespace ShadBuffer
         private bool showDelete;
 
         public event Action<LibraryFile> FilePicked;
+        public event Action FullScreenRequested;
+
+        private static bool savedMuted;
+        private bool isFullScreen;
 
         public PlayerPanel(Context ctx, Uploader uploads, MediaCache cache, Func<bool> confirmUpload, Action closeOverlay)
         {
@@ -90,6 +96,8 @@ namespace ShadBuffer
             strip.Picked += picked => FilePicked?.Invoke(picked);
 
             playButton.Click += (_, __) => Toggle();
+            muteButton.Click += (_, __) => ToggleMute();
+            fullscreenButton.Click += (_, __) => FullScreenRequested?.Invoke();
             scrub.Seeking += value =>
             {
                 if (video != null)
@@ -101,8 +109,10 @@ namespace ShadBuffer
 
             Controls.Add(frame);
             Controls.Add(playButton);
+            Controls.Add(muteButton);
             Controls.Add(scrub);
             Controls.Add(clock);
+            Controls.Add(fullscreenButton);
             Controls.Add(strip);
             Controls.Add(side);
 
@@ -157,6 +167,7 @@ namespace ShadBuffer
             {
                 video = new VideoHost { Dock = DockStyle.Fill };
                 video.Clicked += OnVideoClicked;
+                video.DoubleClicked += () => FullScreenRequested?.Invoke();
                 video.Finished += UpdatePlayState;
                 video.Opened += UpdateClock;
                 video.KeyPressed += OnVideoKey;
@@ -165,6 +176,8 @@ namespace ShadBuffer
             }
 
             video.Load(file.Path);
+            video.IsMuted = savedMuted;
+            UpdateMuteState();
             scrub.Value = 0;
             copyReset.Stop();
             copyButton.Hint = FileHint;
@@ -187,6 +200,31 @@ namespace ShadBuffer
             }
             video.Toggle();
             UpdatePlayState();
+        }
+
+        public void ToggleMute()
+        {
+            if (video == null)
+            {
+                return;
+            }
+            video.ToggleMute();
+            savedMuted = video.IsMuted;
+            UpdateMuteState();
+        }
+
+        private void UpdateMuteState()
+        {
+            muteButton.Icon = (video != null && video.IsMuted) ? Icons.Mute : Icons.Volume;
+        }
+
+        public void SetFullScreen(bool fullScreen)
+        {
+            isFullScreen = fullScreen;
+            fullscreenButton.Icon = isFullScreen ? Icons.BackToWindow : Icons.FullScreen;
+            side.Visible = !isFullScreen;
+            strip.Visible = !isFullScreen;
+            LayoutAll();
         }
 
         public void Unload()
@@ -225,6 +263,23 @@ namespace ShadBuffer
             int gap = Ui.S(RowGap);
             int controls = Ui.S(ControlHeight);
             int stripGap = Ui.S(StripGap);
+            int clockWidth = Ui.S(110);
+
+            if (isFullScreen)
+            {
+                int controlsY = Height - controls - margin;
+                frame.SetBounds(0, 0, Width, Math.Max(0, controlsY - gap));
+
+                playButton.SetBounds(margin, controlsY, controls, controls);
+                muteButton.SetBounds(playButton.Right + gap, controlsY, controls, controls);
+                fullscreenButton.SetBounds(Width - margin - controls, controlsY, controls, controls);
+                clock.SetBounds(fullscreenButton.Left - gap - clockWidth, controlsY, clockWidth, controls);
+                int scrubLeft = muteButton.Right + gap;
+                int scrubRight = clock.Left - gap;
+                scrub.SetBounds(scrubLeft, controlsY, Math.Max(0, scrubRight - scrubLeft), controls);
+                return;
+            }
+
             int width = Math.Max(Ui.S(200), Width - margin * 2 - Ui.S(SideWidth) - Ui.S(SideGap));
 
             // ultrawide monitors would make the video taller than the window, so width gives way
@@ -239,9 +294,12 @@ namespace ShadBuffer
             frame.SetBounds(margin, margin, width, videoHeight);
             int y = frame.Bottom + gap;
             playButton.SetBounds(margin, y, controls, controls);
-            int clockWidth = Ui.S(110);
-            clock.SetBounds(margin + width - clockWidth, y, clockWidth, controls);
-            scrub.SetBounds(playButton.Right + gap, y, width - controls - clockWidth - gap * 2, controls);
+            muteButton.SetBounds(playButton.Right + gap, y, controls, controls);
+            fullscreenButton.SetBounds(margin + width - controls, y, controls, controls);
+            clock.SetBounds(fullscreenButton.Left - gap - clockWidth, y, clockWidth, controls);
+            int sLeft = muteButton.Right + gap;
+            int sRight = clock.Left - gap;
+            scrub.SetBounds(sLeft, y, Math.Max(0, sRight - sLeft), controls);
             y += controls + gap;
             strip.SetBounds(margin, y, width, StripHeight(width));
             strip.Gap = stripGap;
@@ -387,15 +445,31 @@ namespace ShadBuffer
             {
                 Toggle();
             }
+            else if (key == System.Windows.Input.Key.M)
+            {
+                ToggleMute();
+            }
+            else if (key == System.Windows.Input.Key.F || key == System.Windows.Input.Key.F11)
+            {
+                FullScreenRequested?.Invoke();
+            }
             else if (key == System.Windows.Input.Key.Escape)
             {
-                closeOverlay();
+                if (isFullScreen)
+                {
+                    FullScreenRequested?.Invoke();
+                }
+                else
+                {
+                    closeOverlay();
+                }
             }
         }
 
         private void ShowInFolder()
         {
-            Process.Start("explorer.exe", "/select,\"" + file.Path + "\"")?.Dispose();
+            string explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+            Process.Start(explorer, "/select,\"" + file.Path + "\"")?.Dispose();
             closeOverlay();
         }
 

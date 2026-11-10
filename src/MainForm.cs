@@ -116,7 +116,7 @@ namespace ShadBuffer
 
         private void RunSetup()
         {
-            Execute(() => Setup.Install(ctx, Confirm));
+            _ = Execute(() => Setup.Install(ctx, Confirm));
         }
 
         private void RunRemove()
@@ -125,10 +125,10 @@ namespace ShadBuffer
             {
                 return;
             }
-            Execute(() => Setup.Remove(ctx, Confirm));
+            _ = Execute(() => Setup.Remove(ctx, Confirm));
         }
 
-        private async void Execute(Func<string> work)
+        private async Task Execute(Func<string> work)
         {
             setup.Enabled = remove.Enabled = clips.Enabled = false;
             log.Clear();

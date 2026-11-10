@@ -45,6 +45,10 @@ namespace ShadBuffer
         public bool ReplayEnabled { get; set; } = true;
         public bool KappaNoticeSeen { get; set; }
 
+        public string FontChoice { get; set; } = "default";
+        public string CustomFontFile { get; set; } = "";
+        public string CustomFontFace { get; set; } = "";
+
         public static Settings Load(Context ctx)
         {
             Settings settings = File.Exists(ctx.SettingsPath)
@@ -83,6 +87,9 @@ namespace ShadBuffer
             ReplayEnabled = from.ReplayEnabled;
             RecordMic = from.RecordMic;
             KappaNoticeSeen = from.KappaNoticeSeen;
+            FontChoice = from.FontChoice;
+            CustomFontFile = from.CustomFontFile;
+            CustomFontFace = from.CustomFontFace;
         }
 
         public bool SameAs(Settings other)
@@ -105,6 +112,9 @@ namespace ShadBuffer
             a.ScreenshotHotkey = b.ScreenshotHotkey;
             a.ReplayHotkey = b.ReplayHotkey;
             a.MicHotkey = b.MicHotkey;
+            a.FontChoice = b.FontChoice;
+            a.CustomFontFile = b.CustomFontFile;
+            a.CustomFontFace = b.CustomFontFace;
             return a.ToJson() != b.ToJson();
         }
     }

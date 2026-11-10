@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ShadBuffer
@@ -65,9 +67,11 @@ namespace ShadBuffer
                 Location = new Point(Ui.S(PageWidth - Inset - 120), Ui.S(PanelTop + PanelHeight + 8)),
                 Size = new Size(Ui.S(120), Ui.S(40)),
             };
-            applyButton.Click += (_, __) => ApplyChanges();
+            applyButton.Click += (_, __) => _ = ApplyChanges();
             Controls.Add(applyButton);
             UpdateDirty();
+
+            Ui.FontChanged += OnFontChanged;
         }
 
         private Panel BuildClipsTab()
@@ -218,7 +222,158 @@ namespace ShadBuffer
             panel.Controls.Add(NewLabel("Lets OBS capture games running as admin and gives it more GPU priority. Changing this asks for admin approval.", new Point(Ui.S(ControlLeft), y), new Size(Ui.S(ControlWidth), Ui.S(56)), Theme.Muted, 11.75F));
             y += Ui.S(58);
             AddToggleRow(panel, ref y, "Turn off Game Bar capture", draft.GameBarOff, value => draft.GameBarOff = value);
+            AddFontRow(panel, ref y);
             return panel;
+        }
+
+        private void AddFontRow(Panel panel, ref int y)
+        {
+            var choices = new List<Choice>
+            {
+                new Choice("Default (Segoe UI)", Ui.ChoiceDefault),
+                new Choice("Cascadia Code", Ui.ChoiceCascadia),
+                new Choice("Segoe UI Variable", Ui.ChoiceSegoeVariable),
+            };
+
+            List<CustomFontItem> customFonts = Ui.GetAvailableCustomFonts(ctx);
+            foreach (CustomFontItem font in customFonts)
+            {
+                choices.Add(new Choice(font.DisplayName, "custom:" + font.FileName));
+            }
+
+            choices.Add(new Choice("Import font...", "import"));
+
+            string activeValue = draft.FontChoice ?? Ui.ChoiceDefault;
+            if (activeValue == Ui.ChoiceCustom && !string.IsNullOrEmpty(draft.CustomFontFile))
+            {
+                activeValue = "custom:" + draft.CustomFontFile;
+            }
+
+            if (!choices.Any(c => c.Value.Equals(activeValue)))
+            {
+                activeValue = Ui.ChoiceDefault;
+            }
+
+            Action saveFontLive = () =>
+            {
+                draft.Save(ctx);
+                saved.CopyLiveValues(draft);
+                saved.Save(ctx);
+                UpdateDirty();
+            };
+
+            FlatCombo combo = null;
+            combo = NewCombo(choices.ToArray(), activeValue, val =>
+            {
+                string selected = (string)val;
+                if (selected == "import")
+                {
+                    dialogChanged(true);
+                    using (var dialog = new OpenFileDialog
+                    {
+                        Title = "Select a font file (.ttf, .otf)",
+                        Filter = "Font Files (*.ttf;*.otf)|*.ttf;*.otf|All Files (*.*)|*.*",
+                    })
+                    {
+                        if (dialog.ShowDialog() == DialogResult.OK && File.Exists(dialog.FileName))
+                        {
+                            Ui.SetFontChoice(Ui.ChoiceCustom, draft, ctx, dialog.FileName, true);
+                            string key = "custom:" + draft.CustomFontFile;
+                            string label = string.IsNullOrEmpty(draft.CustomFontFace) ? draft.CustomFontFile : draft.CustomFontFace;
+                            var customChoice = new Choice(label, key);
+                            int existingIdx = -1;
+                            for (int i = 0; i < combo.Items.Count; i++)
+                            {
+                                if (((Choice)combo.Items[i]).Value.Equals(key))
+                                {
+                                    existingIdx = i;
+                                    break;
+                                }
+                            }
+                            if (existingIdx >= 0)
+                            {
+                                combo.Items[existingIdx] = customChoice;
+                                combo.SelectedIndex = existingIdx;
+                            }
+                            else
+                            {
+                                combo.Items.Insert(combo.Items.Count - 1, customChoice);
+                                combo.SelectedIndex = combo.Items.Count - 2;
+                            }
+                            saveFontLive();
+                        }
+                        else
+                        {
+                            string restoreVal = draft.FontChoice == Ui.ChoiceCustom ? ("custom:" + draft.CustomFontFile) : draft.FontChoice;
+                            int prevIdx = -1;
+                            for (int i = 0; i < combo.Items.Count; i++)
+                            {
+                                if (((Choice)combo.Items[i]).Value.Equals(restoreVal))
+                                {
+                                    prevIdx = i;
+                                    break;
+                                }
+                            }
+                            if (prevIdx >= 0)
+                            {
+                                combo.SelectedIndex = prevIdx;
+                            }
+                        }
+                    }
+                    dialogChanged(false);
+                }
+                else if (selected != null && selected.StartsWith("custom:"))
+                {
+                    string fontFile = selected.Substring("custom:".Length);
+                    draft.FontChoice = Ui.ChoiceCustom;
+                    draft.CustomFontFile = fontFile;
+                    Ui.SetFontChoice(selected, draft, ctx, null, true);
+                    saveFontLive();
+                }
+                else
+                {
+                    draft.FontChoice = selected;
+                    Ui.SetFontChoice(selected, draft, ctx, null, true);
+                    saveFontLive();
+                }
+            });
+
+            AddRow(panel, ref y, "Font", combo);
+        }
+
+        private void OnFontChanged()
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            RefreshFonts(this);
+        }
+
+        private static void RefreshFonts(Control parent)
+        {
+            foreach (Control c in parent.Controls)
+            {
+                if (c is Label lbl && lbl.Tag is float fontSize)
+                {
+                    lbl.Font = Ui.Text(fontSize);
+                }
+                else if (c is FlatCombo || c is ActionButton || c is LibraryTab || c is HotkeyBox)
+                {
+                    c.Font = Ui.Text(13);
+                }
+                RefreshFonts(c);
+            }
+            parent.Invalidate(true);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Ui.FontChanged -= OnFontChanged;
+            }
+            base.Dispose(disposing);
         }
 
         private void UpdateCaptureHelp()
@@ -356,6 +511,7 @@ namespace ShadBuffer
                 Size = size,
                 ForeColor = color,
                 Font = Ui.Text(fontSize),
+                Tag = fontSize,
                 BackColor = Color.Transparent,
             };
         }
@@ -387,7 +543,7 @@ namespace ShadBuffer
                 .FirstOrDefault();
         }
 
-        private async void ApplyChanges()
+        private async Task ApplyChanges()
         {
             if (!applyButton.Enabled)
             {

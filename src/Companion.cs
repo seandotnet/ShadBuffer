@@ -17,6 +17,7 @@ namespace ShadBuffer
     {
         private const string MutexName = @"Local\ShadBuffer.Companion";
         private const string QuitEventName = @"Local\ShadBuffer.Quit";
+        private const string ShowOverlayEventName = @"Local\ShadBuffer.ShowOverlay";
         private const int OverlayHotkeyId = 1;
         private const int TestHotkeyId = 2;
         private const int RecordHotkeyId = 3;
@@ -32,6 +33,9 @@ namespace ShadBuffer
         private readonly HotkeyWindow window;
         private readonly System.Windows.Forms.Timer timer;
         private readonly EventWaitHandle quitEvent;
+        private readonly EventWaitHandle showOverlayEvent;
+        private readonly RegisteredWaitHandle showOverlayRegistration;
+        private readonly SynchronizationContext syncContext;
         private readonly Icon iconOn = MakeIcon(Color.FromArgb(235, 64, 64));
         private readonly Icon iconOff = MakeIcon(Color.FromArgb(120, 120, 128));
 
@@ -47,7 +51,24 @@ namespace ShadBuffer
         public Companion(Context ctx)
         {
             this.ctx = ctx;
+            syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            Ui.ApplySettings(Settings.Load(ctx), ctx);
             quitEvent = new EventWaitHandle(false, EventResetMode.ManualReset, QuitEventName);
+            showOverlayEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowOverlayEventName);
+            showOverlayRegistration = ThreadPool.RegisterWaitForSingleObject(showOverlayEvent, (_, __) =>
+            {
+                syncContext.Post(_ =>
+                {
+                    if (overlay == null)
+                    {
+                        ToggleOverlay();
+                    }
+                    else
+                    {
+                        overlay.Activate();
+                    }
+                }, null);
+            }, null, -1, false);
 
             window = new HotkeyWindow(OnHotkey);
             tray = new NotifyIcon { Icon = iconOff, Text = Context.AppName, Visible = true };
@@ -71,12 +92,16 @@ namespace ShadBuffer
             timer.Start();
         }
 
-        public static int Run(Context ctx, bool atLogin)
+        public static int Run(Context ctx, bool atLogin, bool showOverlay = false)
         {
             using (var mutex = new Mutex(true, MutexName, out bool first))
             {
                 if (!first)
                 {
+                    if (showOverlay)
+                    {
+                        SignalShowOverlay();
+                    }
                     return 0;
                 }
                 using (var companion = new Companion(ctx))
@@ -85,11 +110,28 @@ namespace ShadBuffer
                     {
                         companion.StartObsAtLogin();
                     }
+                    else if (showOverlay)
+                    {
+                        companion.ToggleOverlay();
+                    }
                     Application.Run(companion);
                 }
                 GC.KeepAlive(mutex);
             }
             return 0;
+        }
+
+        public static bool SignalShowOverlay()
+        {
+            if (EventWaitHandle.TryOpenExisting(ShowOverlayEventName, out EventWaitHandle handle))
+            {
+                using (handle)
+                {
+                    handle.Set();
+                    return true;
+                }
+            }
+            return false;
         }
 
         // left off stays off across a reboot, so obs only starts if recording is meant to be on
@@ -114,19 +156,23 @@ namespace ShadBuffer
 
         public static bool IsRunning()
         {
-            return Mutex.TryOpenExisting(MutexName, out Mutex mutex) && Dispose(mutex);
+            return Mutex.TryOpenExisting(MutexName, out Mutex mutex) && SafeDispose(mutex);
         }
 
-        public static void EnsureRunning(Context ctx)
+        public static void EnsureRunning(Context ctx, bool showOverlay = false)
         {
             if (!IsRunning() && File.Exists(ctx.InstalledExe))
             {
-                // run from my own folder or the helper locks whatever folder setup ran from
-                Process.Start(new ProcessStartInfo(ctx.InstalledExe, "--tray")
+                string args = showOverlay ? "--tray --show-overlay" : "--tray";
+                Process.Start(new ProcessStartInfo(ctx.InstalledExe, args)
                 {
                     UseShellExecute = true,
                     WorkingDirectory = ctx.AppDir,
                 })?.Dispose();
+            }
+            else if (showOverlay)
+            {
+                SignalShowOverlay();
             }
         }
 
@@ -164,6 +210,8 @@ namespace ShadBuffer
                 RegisterHotkeys();
             };
             overlay.Show();
+            overlay.Activate();
+            overlay.BringToFront();
         }
 
         // windows swallows a registered combo, so a hotkey box couldn't see it otherwise
@@ -243,6 +291,8 @@ namespace ShadBuffer
         {
             if (disposing)
             {
+                showOverlayRegistration?.Unregister(null);
+                showOverlayEvent.Dispose();
                 timer.Dispose();
                 tray.Visible = false;
                 tray.Dispose();
@@ -255,7 +305,7 @@ namespace ShadBuffer
             base.Dispose(disposing);
         }
 
-        private static bool Dispose(IDisposable item)
+        private static bool SafeDispose(IDisposable item)
         {
             item.Dispose();
             return true;
@@ -277,7 +327,7 @@ namespace ShadBuffer
         {
             if (File.Exists(ctx.InstalledExe))
             {
-                Process.Start(new ProcessStartInfo(ctx.InstalledExe) { UseShellExecute = true })?.Dispose();
+                Process.Start(new ProcessStartInfo(ctx.InstalledExe, "--setup") { UseShellExecute = true })?.Dispose();
             }
         }
 
@@ -419,6 +469,19 @@ namespace ShadBuffer
                 overlay?.Close();
                 ExitThread();
                 return;
+            }
+
+            if (showOverlayEvent.WaitOne(0))
+            {
+                if (overlay == null)
+                {
+                    ToggleOverlay();
+                }
+                else
+                {
+                    overlay.Activate();
+                    overlay.BringToFront();
+                }
             }
 
             ObsStatus status = ObsControl.ReadStatus(ctx);

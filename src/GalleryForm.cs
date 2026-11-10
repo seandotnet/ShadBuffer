@@ -38,6 +38,9 @@ namespace ShadBuffer
         private LibraryFolder openFolder;
         private LibraryFile openFile;
         private int scanNumber;
+        private Rectangle preFullScreenBounds;
+
+        public bool IsFullScreen { get; private set; }
 
         public LibraryKind Kind { get; private set; }
         public bool ShowingSettings { get; private set; }
@@ -81,6 +84,7 @@ namespace ShadBuffer
 
             KeyDown += OnKey;
             Deactivate += (_, __) => dock.CheckFocusSoon();
+            Ui.FontChanged += OnFontChanged;
         }
 
         public void ShowLibrary(LibraryKind kind)
@@ -93,7 +97,7 @@ namespace ShadBuffer
             Bounds = area;
             ShowPanel();
             Render();
-            Rescan();
+            _ = Rescan();
         }
 
         public void ShowSettings()
@@ -115,6 +119,10 @@ namespace ShadBuffer
 
         public void CloseGallery()
         {
+            if (IsFullScreen)
+            {
+                ToggleFullScreen();
+            }
             // focus has to land before this hides, or the focus check closes the whole overlay
             player?.Unload();
             dock.Activate();
@@ -156,17 +164,31 @@ namespace ShadBuffer
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            using (var pen = new Pen(Theme.Border))
+            if (!IsFullScreen)
             {
-                e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+                using (var pen = new Pen(Theme.Border))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+                }
             }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            Ui.FontChanged -= OnFontChanged;
             player?.Unload();
             cache.Dispose();
             base.OnFormClosed(e);
+        }
+
+        private void OnFontChanged()
+        {
+            if (IsDisposed)
+            {
+                return;
+            }
+            Font = Ui.Text(13);
+            Invalidate(true);
         }
 
         private void ShowPanel()
@@ -182,16 +204,34 @@ namespace ShadBuffer
         {
             if (e.KeyCode == Keys.Escape)
             {
-                dock.CloseIfIdle();
+                if (IsFullScreen)
+                {
+                    ToggleFullScreen();
+                    e.Handled = true;
+                }
+                else
+                {
+                    dock.CloseIfIdle();
+                }
             }
-            else if (e.KeyCode == Keys.Space && openFile != null)
+            else if ((e.KeyCode == Keys.F || e.KeyCode == Keys.F11) && openFile != null)
+            {
+                ToggleFullScreen();
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.M && openFile != null && player != null)
+            {
+                player.ToggleMute();
+                e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Space && openFile != null && player != null)
             {
                 player.Toggle();
                 e.Handled = true;
             }
         }
 
-        private async void Rescan()
+        private async Task Rescan()
         {
             int number = ++scanNumber;
             Settings saved = Settings.Load(ctx);
@@ -266,6 +306,7 @@ namespace ShadBuffer
             {
                 player = new PlayerPanel(ctx, owner.Uploads, cache, ConfirmUpload, dock.CloseForOtherApp);
                 player.FilePicked += OpenFile;
+                player.FullScreenRequested += ToggleFullScreen;
                 Controls.Add(player);
                 LayoutPage();
             }
@@ -275,6 +316,10 @@ namespace ShadBuffer
 
         private void GoBack()
         {
+            if (IsFullScreen)
+            {
+                ToggleFullScreen();
+            }
             if (openFile != null)
             {
                 player.Unload();
@@ -285,24 +330,32 @@ namespace ShadBuffer
                 openFolder = null;
             }
             Render();
-            Rescan();
+            _ = Rescan();
         }
 
         private void GoToRoot()
         {
+            if (IsFullScreen)
+            {
+                ToggleFullScreen();
+            }
             player?.Unload();
             openFile = null;
             openFolder = null;
             Render();
-            Rescan();
+            _ = Rescan();
         }
 
         private void GoToFolder()
         {
+            if (IsFullScreen)
+            {
+                ToggleFullScreen();
+            }
             player?.Unload();
             openFile = null;
             Render();
-            Rescan();
+            _ = Rescan();
         }
 
         private void Render()
@@ -329,7 +382,8 @@ namespace ShadBuffer
                 string root = Kind == LibraryKind.Clips ? "Clips" : "Recordings";
                 if (openFile != null)
                 {
-                    crumb.Set(null, Part(root, GoToRoot), Part(openFolder.Name, GoToFolder), Part(Library.When(openFile.Modified), null));
+                    string folderName = openFolder != null ? openFolder.Name : root;
+                    crumb.Set(null, Part(root, GoToRoot), Part(folderName, GoToFolder), Part(Library.When(openFile.Modified), null));
                 }
                 else if (openFolder != null)
                 {
@@ -349,10 +403,48 @@ namespace ShadBuffer
             return new KeyValuePair<string, Action>(text, click);
         }
 
+        public void ToggleFullScreen()
+        {
+            if (player == null || openFile == null)
+            {
+                return;
+            }
+
+            if (!IsFullScreen)
+            {
+                preFullScreenBounds = Bounds;
+                IsFullScreen = true;
+                bar.Visible = false;
+                barLine.Visible = false;
+                Rectangle screen = Screen.FromControl(this).Bounds;
+                Bounds = screen;
+                player.Bounds = ClientRectangle;
+                player.SetFullScreen(true);
+                BringToFront();
+            }
+            else
+            {
+                IsFullScreen = false;
+                bar.Visible = true;
+                barLine.Visible = true;
+                Bounds = preFullScreenBounds;
+                player.SetFullScreen(false);
+                LayoutPage();
+            }
+        }
+
         private void LayoutPage()
         {
             if (bar == null || grid == null)
             {
+                return;
+            }
+            if (IsFullScreen)
+            {
+                if (player != null)
+                {
+                    player.Bounds = ClientRectangle;
+                }
                 return;
             }
             int width = ClientSize.Width;
